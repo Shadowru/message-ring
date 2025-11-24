@@ -4,12 +4,13 @@ import (
 	"core-go/handlers"
 	"core-go/models"
 	"core-go/workers"
+	"log"
+	"os"
+
 	"github.com/gin-gonic/gin"
 	"github.com/hibiken/asynq"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"log"
-	"os"
 )
 
 func main() {
@@ -26,14 +27,14 @@ func main() {
 	// 2. Настройка Redis (Asynq)
 	redisAddr := os.Getenv("REDIS_ADDR")
 	redisOpt := asynq.RedisClientOpt{Addr: redisAddr}
-	
+
 	// Клиент для отправки задач
 	queueClient := asynq.NewClient(redisOpt)
 	defer queueClient.Close()
 
 	// 3. Запуск Воркера (Server) в отдельной горутине
 	queueServer := asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: 10, // 10 параллельных потоков обработки
+		Concurrency: 10,
 	})
 
 	mux := asynq.NewServeMux()
@@ -47,21 +48,19 @@ func main() {
 
 	// 4. Запуск HTTP сервера (Gin)
 	r := gin.Default()
-	
+
 	whHandler := &handlers.WebhookHandler{DB: db, QueueClient: queueClient}
 
 	api := r.Group("/api")
 	{
-		// Админка (тут добавить Middleware JWT auth)
-		// api.Use(authMiddleware)
-		
-		webhooks := r.Group("/webhooks")
+		// ВАЖНО: Используем переменную api, чтобы создать вложенный путь /api/webhooks
+		webhooks := api.Group("/webhooks")
 		{
 			webhooks.POST("/wa", whHandler.HandleWA)
-			webhooks.POST("/tg", whHandler.HandleTG) // Реализовать
-			webhooks.POST("/maks", whHandler.HandleMAKS) // Реализовать
+			webhooks.POST("/tg", whHandler.HandleTG)
+			webhooks.POST("/maks", whHandler.HandleMAKS)
 		}
 	}
 
-	r.Run(":8080") // Слушаем порт внутри контейнера
+	r.Run(":8080")
 }

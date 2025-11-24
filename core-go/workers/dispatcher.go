@@ -2,13 +2,15 @@ package workers
 
 import (
 	"context"
+	"core-go/models"
 	"encoding/json"
 	"fmt"
-	"github.com/hibiken/asynq"
-	"github.com/go-resty/resty/v2" // Удобный HTTP клиент
-	"core-go/models"
-	"gorm.io/gorm"
 	"log"
+	"time"
+
+	"github.com/go-resty/resty/v2"
+	"github.com/hibiken/asynq"
+	"gorm.io/gorm"
 )
 
 const TypeSendToN8N = "message:send_n8n"
@@ -43,10 +45,10 @@ func HandleSendToN8N(db *gorm.DB) asynq.HandlerFunc {
 		for _, group := range account.Groups {
 			// Формируем финальный JSON для n8n
 			finalBody := map[string]interface{}{
-				"source":    p.Message.Source,
-				"group":     group.Name,
-				"sender":    map[string]string{
-					"id": p.Message.SenderID,
+				"source": p.Message.Source,
+				"group":  group.Name,
+				"sender": map[string]string{
+					"id":   p.Message.SenderID,
 					"name": p.Message.SenderName,
 				},
 				"message":   p.Message.Text,

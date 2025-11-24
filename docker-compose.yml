@@ -144,15 +144,15 @@ services:
   # ==========================================
   # ADAPTER: MAKS
   # ==========================================
-  adapter-maks:
-    build: ./adapters/maks
-    restart: always
-    environment:
-      MAKS_API_BASE_URL: ${MAKS_API_BASE_URL}
-      MAKS_TOKEN: ${MAKS_SERVICE_TOKEN}
-      CORE_WEBHOOK_URL: "http://core:8080/api/webhooks/maks"
-    networks:
-      - messenger_net
+  #adapter-maks:
+  #  build: ./adapters/maks
+  #  restart: always
+  #  environment:
+  #    MAKS_API_BASE_URL: ${MAKS_API_BASE_URL}
+  #    MAKS_TOKEN: ${MAKS_SERVICE_TOKEN}
+  #    CORE_WEBHOOK_URL: "http://core:8080/api/webhooks/maks"
+  #  networks:
+  #    - messenger_net
 
 # ==========================================
 # VOLUMES

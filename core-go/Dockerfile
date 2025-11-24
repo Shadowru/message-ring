@@ -1,21 +1,18 @@
 # --- Stage 1: Builder ---
-FROM golang:1.21-alpine AS builder
+# Обновили версию Go до 1.23
+FROM golang:1.23-alpine AS builder
 
-# Устанавливаем git (нужен для скачивания зависимостей)
 RUN apk add --no-cache git
 
 WORKDIR /app
 
-# 1. Копируем ВЕСЬ исходный код сразу
 COPY . .
 
-# 2. Магия авто-инициализации:
-# Если файла go.mod нет -> создаем его.
-# Затем запускаем go mod tidy, который скачает библиотеки и создаст go.sum
+# Авто-инициализация зависимостей
 RUN if [ ! -f go.mod ]; then go mod init core-go; fi && \
     go mod tidy
 
-# 3. Собираем бинарник
+# Сборка
 RUN CGO_ENABLED=0 GOOS=linux go build -o core-app ./cmd/main.go
 
 # --- Stage 2: Production Image ---

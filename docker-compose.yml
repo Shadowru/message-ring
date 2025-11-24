@@ -1,0 +1,171 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # TRAEFIK (Reverse Proxy & SSL Manager)
+  # ==========================================
+  traefik:
+    image: traefik:v2.10
+    restart: always
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Редирект HTTP -> HTTPS
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      # Настройка Let's Encrypt
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - messenger_net
+
+  # ==========================================
+  # INFRASTRUCTURE (DB & Cache)
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: messenger_gateway
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - messenger_net
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --save 60 1 --loglevel warning
+    networks:
+      - messenger_net
+
+  # ==========================================
+  # CORE SYSTEM (Go Backend)
+  # ==========================================
+  core:
+    build:
+      context: ./core-go
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      # Настройки приложения
+      PUBLIC_API_URL: "https://api.${DOMAIN_NAME}"
+      # Подключение к БД
+      DATABASE_DSN: "host=postgres user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} port=5432 sslmode=disable"
+      # Подключение к Redis
+      REDIS_ADDR: "redis:6379"
+      # Внутренние ссылки на адаптеры
+      ADAPTER_WA_URL: "http://adapter-wa:3000"
+      ADAPTER_TG_URL: "http://adapter-tg:3000"
+      ADAPTER_MAKS_URL: "http://adapter-maks:3000"
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - messenger_net
+    labels:
+      - "traefik.enable=true"
+      # Домен API: api.example.com
+      - "traefik.http.routers.core.rule=Host(`api.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.core.entrypoints=websecure"
+      - "traefik.http.routers.core.tls.certresolver=myresolver"
+      - "traefik.http.services.core.loadbalancer.server.port=8080"
+
+  # ==========================================
+  # FRONTEND (Admin UI)
+  # ==========================================
+  frontend:
+    build: ./admin-ui
+    restart: always
+    networks:
+      - messenger_net
+    labels:
+      - "traefik.enable=true"
+      # Основной домен: example.com
+      - "traefik.http.routers.front.rule=Host(`${DOMAIN_NAME}`)"
+      - "traefik.http.routers.front.entrypoints=websecure"
+      - "traefik.http.routers.front.tls.certresolver=myresolver"
+      - "traefik.http.services.front.loadbalancer.server.port=80"
+
+  # ==========================================
+  # ADAPTER: WhatsApp (WAHA)
+  # ==========================================
+  adapter-wa:
+    image: ${WAHA_IMAGE}
+    restart: always
+    environment:
+      # WAHA будет слать вебхуки на внутренний адрес ядра
+      WHATSAPP_HOOK_URL: "http://core:8080/api/webhooks/wa"
+      WAHA_LOG_LEVEL: "info"
+      WAHA_DOWNLOAD_MEDIA: "true"
+    volumes:
+      # Сохраняем сессии и файлы, чтобы не терять вход при рестарте
+      - wa_sessions:/app/sessions
+      - wa_files:/app/files
+    networks:
+      - messenger_net
+    labels:
+      - "traefik.enable=true"
+      # Опционально: доступ к дашборду WAHA через waha.example.com
+      - "traefik.http.routers.waha.rule=Host(`waha.${DOMAIN_NAME}`)"
+      - "traefik.http.routers.waha.entrypoints=websecure"
+      - "traefik.http.routers.waha.tls.certresolver=myresolver"
+      - "traefik.http.routers.waha.service=waha"
+      - "traefik.http.services.waha.loadbalancer.server.port=3000"
+
+  # ==========================================
+  # ADAPTER: Telegram (Custom)
+  # ==========================================
+  adapter-tg:
+    build: ./adapters/telegram
+    restart: always
+    environment:
+      TG_API_ID: ${TG_API_ID}
+      TG_API_HASH: ${TG_API_HASH}
+      CORE_WEBHOOK_URL: "http://core:8080/api/webhooks/tg"
+    volumes:
+      - tg_sessions:/app/store
+    networks:
+      - messenger_net
+
+  # ==========================================
+  # ADAPTER: MAKS
+  # ==========================================
+  adapter-maks:
+    build: ./adapters/maks
+    restart: always
+    environment:
+      MAKS_API_BASE_URL: ${MAKS_API_BASE_URL}
+      MAKS_TOKEN: ${MAKS_SERVICE_TOKEN}
+      CORE_WEBHOOK_URL: "http://core:8080/api/webhooks/maks"
+    networks:
+      - messenger_net
+
+# ==========================================
+# VOLUMES
+# ==========================================
+volumes:
+  pg_data:
+  wa_sessions:
+  wa_files:
+  tg_sessions:
+
+# ==========================================
+# NETWORKS
+# ==========================================
+networks:
+  messenger_net:
+    driver: bridge
